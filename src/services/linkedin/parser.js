@@ -1,4 +1,5 @@
 const cheerio = require('cheerio');
+const vm = require('vm');
 const logger = require('../../utils/logger');
 
 class LinkedInParser {
@@ -24,22 +25,26 @@ class LinkedInParser {
     // 3. Extract Public DOM Elements & Microdata
     const domData = this.extractDomData($);
 
-    // Merge and synthesize extracted data with priority: JSON-LD > DOM > OpenGraph
+    // 4. Extract from React Server Component (RSC) Rehydration Stream
+    const rscData = this.extractRscData($);
+
+    // Merge and synthesize extracted data with priority: JSON-LD > RSC > DOM > OpenGraph
     const combined = {
       url: targetUrl || metaData.canonicalUrl || metaData.ogUrl || null,
-      name: jsonLdData.name || domData.name || metaData.name || null,
-      headline: jsonLdData.headline || domData.headline || metaData.headline || null,
-      location: jsonLdData.location || domData.location || metaData.location || null,
-      about: jsonLdData.about || domData.about || metaData.about || null,
-      profileImage: jsonLdData.profileImage || domData.profileImage || metaData.profileImage || null,
-      experience: jsonLdData.experience.length ? jsonLdData.experience : domData.experience,
-      education: jsonLdData.education.length ? jsonLdData.education : domData.education,
-      skills: jsonLdData.skills.length ? jsonLdData.skills : domData.skills,
-      certifications: jsonLdData.certifications.length ? jsonLdData.certifications : domData.certifications,
-      languages: jsonLdData.languages.length ? jsonLdData.languages : domData.languages,
+      name: jsonLdData.name || rscData.name || domData.name || metaData.name || null,
+      headline: jsonLdData.headline || rscData.headline || domData.headline || metaData.headline || null,
+      location: jsonLdData.location || rscData.location || domData.location || metaData.location || null,
+      about: jsonLdData.about || rscData.about || domData.about || metaData.about || null,
+      profileImage: jsonLdData.profileImage || rscData.profileImage || domData.profileImage || metaData.profileImage || null,
+      experience: jsonLdData.experience.length ? jsonLdData.experience : (rscData.experience.length ? rscData.experience : domData.experience),
+      education: jsonLdData.education.length ? jsonLdData.education : (rscData.education.length ? rscData.education : domData.education),
+      skills: jsonLdData.skills.length ? jsonLdData.skills : (rscData.skills.length ? rscData.skills : domData.skills),
+      certifications: jsonLdData.certifications.length ? jsonLdData.certifications : (rscData.certifications.length ? rscData.certifications : domData.certifications),
+      languages: jsonLdData.languages.length ? jsonLdData.languages : (rscData.languages.length ? rscData.languages : domData.languages),
       additionalInfo: {
         ...metaData.additional,
-        ...domData.additional
+        ...domData.additional,
+        ...rscData.additional
       }
     };
 
@@ -61,6 +66,103 @@ class LinkedInParser {
       languages: [],
       additionalInfo: {}
     };
+  }
+
+  /**
+   * Extract from React Server Component (RSC) Rehydration Stream
+   */
+  extractRscData($) {
+    const result = {
+      name: null,
+      headline: null,
+      location: null,
+      about: null,
+      profileImage: null,
+      experience: [],
+      education: [],
+      skills: [],
+      certifications: [],
+      languages: [],
+      additional: {}
+    };
+
+    // 1. Check title tag
+    const titleTag = $('title').text() || '';
+    if (titleTag && titleTag.includes('| LinkedIn')) {
+      const cleanedTitle = titleTag.replace(/\s*\|\s*LinkedIn.*$/i, '').trim();
+      if (cleanedTitle && cleanedTitle !== 'LinkedIn' && cleanedTitle !== 'Feed') {
+        if (cleanedTitle.includes(' - ')) {
+          const parts = cleanedTitle.split(' - ');
+          result.name = parts[0].trim();
+          result.headline = parts.slice(1).join(' - ').trim();
+        } else {
+          result.name = cleanedTitle;
+        }
+      }
+    }
+
+    const rawScript = $('script#rehydrate-data').html() || '';
+    if (!rawScript.includes('__como_rehydration__')) {
+      return result;
+    }
+
+    const context = { window: {} };
+    vm.createContext(context);
+    try {
+      vm.runInContext(rawScript, context, { timeout: 3000 });
+      const chunks = context.window.__como_rehydration__ || [];
+
+      for (const chunk of chunks) {
+        if (typeof chunk !== 'string') continue;
+
+        // Title in metadata
+        const metaTitleMatch = chunk.match(/\["title",null,\{"children":"([^"]+)\s*\|\s*LinkedIn"\}\]/);
+        if (metaTitleMatch && !result.name) {
+          const t = metaTitleMatch[1].trim();
+          if (t.includes(' - ')) {
+            const parts = t.split(' - ');
+            result.name = parts[0].trim();
+            if (!result.headline) result.headline = parts.slice(1).join(' - ').trim();
+          } else {
+            result.name = t;
+          }
+        }
+
+        // Action buttons containing member name
+        const actionMatch = chunk.match(/"children":\["(?:Unfollow|Report|Block)\s+([^"]+)"\]/);
+        if (actionMatch && !result.name) {
+          result.name = actionMatch[1].trim();
+        }
+
+        // Profile Image
+        const imgMatch = chunk.match(/"imageUrl":\s*"([^"]+)"/) || chunk.match(/"url":\s*"(https:\/\/media\.licdn\.com\/dms\/image\/[^"]+)"/);
+        if (imgMatch && !result.profileImage) {
+          result.profileImage = imgMatch[1];
+        }
+
+        // Headline
+        const headlineMatch = chunk.match(/"headline":\s*"([^"]+)"/);
+        if (headlineMatch && !result.headline) {
+          result.headline = headlineMatch[1];
+        }
+
+        // Location
+        const locMatch = chunk.match(/"locationName":\s*"([^"]+)"/) || chunk.match(/"geoCountryName":\s*"([^"]+)"/);
+        if (locMatch && !result.location) {
+          result.location = locMatch[1];
+        }
+
+        // Summary
+        const summaryMatch = chunk.match(/"summary":\s*"([^"]+)"/);
+        if (summaryMatch && !result.about) {
+          result.about = summaryMatch[1];
+        }
+      }
+    } catch (e) {
+      logger.debug(`Failed to parse RSC stream: ${e.message}`);
+    }
+
+    return result;
   }
 
   /**
@@ -230,7 +332,6 @@ class LinkedInParser {
     // LinkedIn meta description pattern often contains location & headline summary
     let parsedAbout = ogDesc || null;
     if (ogDesc) {
-      // e.g. "Location · Headline · Experience · Education"
       const parts = ogDesc.split(' · ');
       if (parts.length > 1 && !parsedLocation) {
         parsedLocation = parts[0].trim();
@@ -286,7 +387,6 @@ class LinkedInParser {
     const locationEl = $('.top-card__subline-item, .top-card-layout__first-subline, .pv-top-card--list-bullet li, .profile-info-subheader').first();
     if (locationEl.length) {
       const locText = locationEl.text().trim().replace(/\s+/g, ' ');
-      // Filter out connection counts or invalid strings
       if (!locText.toLowerCase().includes('connections') && !locText.toLowerCase().includes('followers')) {
         result.location = locText;
       }
