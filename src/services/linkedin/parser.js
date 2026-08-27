@@ -1,0 +1,406 @@
+const cheerio = require('cheerio');
+const logger = require('../../utils/logger');
+
+class LinkedInParser {
+  /**
+   * Parse HTML and extract all available profile signals
+   * @param {string} html 
+   * @param {string} targetUrl 
+   * @returns {object} Raw extracted fields
+   */
+  parse(html, targetUrl) {
+    if (!html || typeof html !== 'string') {
+      return this.emptyResult(targetUrl);
+    }
+
+    const $ = cheerio.load(html);
+
+    // 1. Extract JSON-LD structured data (Schema.org Person / ProfilePage)
+    const jsonLdData = this.extractJsonLd($);
+
+    // 2. Extract OpenGraph & Meta tags
+    const metaData = this.extractMetaData($);
+
+    // 3. Extract Public DOM Elements & Microdata
+    const domData = this.extractDomData($);
+
+    // Merge and synthesize extracted data with priority: JSON-LD > DOM > OpenGraph
+    const combined = {
+      url: targetUrl || metaData.canonicalUrl || metaData.ogUrl || null,
+      name: jsonLdData.name || domData.name || metaData.name || null,
+      headline: jsonLdData.headline || domData.headline || metaData.headline || null,
+      location: jsonLdData.location || domData.location || metaData.location || null,
+      about: jsonLdData.about || domData.about || metaData.about || null,
+      profileImage: jsonLdData.profileImage || domData.profileImage || metaData.profileImage || null,
+      experience: jsonLdData.experience.length ? jsonLdData.experience : domData.experience,
+      education: jsonLdData.education.length ? jsonLdData.education : domData.education,
+      skills: jsonLdData.skills.length ? jsonLdData.skills : domData.skills,
+      certifications: jsonLdData.certifications.length ? jsonLdData.certifications : domData.certifications,
+      languages: jsonLdData.languages.length ? jsonLdData.languages : domData.languages,
+      additionalInfo: {
+        ...metaData.additional,
+        ...domData.additional
+      }
+    };
+
+    return combined;
+  }
+
+  emptyResult(targetUrl) {
+    return {
+      url: targetUrl || null,
+      name: null,
+      headline: null,
+      location: null,
+      about: null,
+      profileImage: null,
+      experience: [],
+      education: [],
+      skills: [],
+      certifications: [],
+      languages: [],
+      additionalInfo: {}
+    };
+  }
+
+  /**
+   * Extract Schema.org structured metadata from <script type="application/ld+json">
+   */
+  extractJsonLd($) {
+    const result = {
+      name: null,
+      headline: null,
+      location: null,
+      about: null,
+      profileImage: null,
+      experience: [],
+      education: [],
+      skills: [],
+      certifications: [],
+      languages: []
+    };
+
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const rawContent = $(el).html();
+        if (!rawContent) return;
+        const parsed = JSON.parse(rawContent.trim());
+        const items = Array.isArray(parsed) ? parsed : (parsed['@graph'] || [parsed]);
+
+        for (const item of items) {
+          if (!item) continue;
+          const type = item['@type'];
+          const isPerson = type === 'Person' || (Array.isArray(type) && type.includes('Person'));
+          const isProfile = type === 'ProfilePage' || (Array.isArray(type) && type.includes('ProfilePage'));
+
+          const person = isPerson ? item : (item.mainEntity && item.mainEntity['@type'] === 'Person' ? item.mainEntity : (isProfile ? item.mainEntity : null));
+
+          if (person) {
+            // Name
+            if (person.name && typeof person.name === 'string') {
+              result.name = person.name.trim();
+            } else if (person.givenName || person.familyName) {
+              result.name = [person.givenName, person.familyName].filter(Boolean).join(' ').trim();
+            }
+
+            // Headline / Job title
+            if (person.jobTitle) {
+              result.headline = typeof person.jobTitle === 'string' ? person.jobTitle.trim() : (Array.isArray(person.jobTitle) ? person.jobTitle.join(', ') : null);
+            }
+
+            // Location
+            if (person.address) {
+              if (typeof person.address === 'string') {
+                result.location = person.address.trim();
+              } else if (typeof person.address === 'object') {
+                const parts = [
+                  person.address.addressLocality,
+                  person.address.addressRegion,
+                  person.address.addressCountry
+                ].filter(Boolean);
+                if (parts.length) result.location = parts.join(', ');
+              }
+            }
+
+            // About / Description
+            if (person.description && typeof person.description === 'string') {
+              result.about = person.description.trim();
+            }
+
+            // Image
+            if (person.image) {
+              if (typeof person.image === 'string') {
+                result.profileImage = person.image.trim();
+              } else if (person.image.contentUrl) {
+                result.profileImage = person.image.contentUrl.trim();
+              } else if (person.image.url) {
+                result.profileImage = person.image.url.trim();
+              }
+            }
+
+            // Experience from worksFor / organization
+            if (person.worksFor) {
+              const works = Array.isArray(person.worksFor) ? person.worksFor : [person.worksFor];
+              for (const w of works) {
+                if (!w) continue;
+                const company = typeof w === 'string' ? w : (w.name || w.legalName || null);
+                if (company) {
+                  result.experience.push({
+                    title: person.jobTitle || '',
+                    company: company,
+                    location: '',
+                    startDate: '',
+                    endDate: '',
+                    description: ''
+                  });
+                }
+              }
+            }
+
+            // Education from alumniOf
+            if (person.alumniOf) {
+              const schools = Array.isArray(person.alumniOf) ? person.alumniOf : [person.alumniOf];
+              for (const s of schools) {
+                if (!s) continue;
+                const inst = typeof s === 'string' ? s : (s.name || null);
+                if (inst) {
+                  result.education.push({
+                    institution: inst,
+                    degree: '',
+                    fieldOfStudy: '',
+                    startDate: '',
+                    endDate: '',
+                    description: ''
+                  });
+                }
+              }
+            }
+
+            // Skills from knowsAbout
+            if (person.knowsAbout) {
+              const skills = Array.isArray(person.knowsAbout) ? person.knowsAbout : [person.knowsAbout];
+              result.skills = skills.map(sk => (typeof sk === 'string' ? sk : sk.name)).filter(Boolean);
+            }
+          }
+        }
+      } catch (err) {
+        logger.debug(`Failed to parse JSON-LD chunk: ${err.message}`);
+      }
+    });
+
+    return result;
+  }
+
+  /**
+   * Extract OpenGraph and Twitter meta tag metadata
+   */
+  extractMetaData($) {
+    const getMeta = (names) => {
+      for (const name of names) {
+        const val = $(`meta[property="${name}"]`).attr('content') ||
+                    $(`meta[name="${name}"]`).attr('content') ||
+                    $(`meta[itemprop="${name}"]`).attr('content');
+        if (val && val.trim()) return val.trim();
+      }
+      return null;
+    };
+
+    const ogTitle = getMeta(['og:title', 'twitter:title']);
+    const ogImage = getMeta(['og:image', 'twitter:image', 'image']);
+    const ogDesc = getMeta(['og:description', 'twitter:description', 'description']);
+    const ogUrl = getMeta(['og:url', 'canonical']);
+    const canonical = $('link[rel="canonical"]').attr('href') || null;
+
+    let parsedName = null;
+    let parsedHeadline = null;
+    let parsedLocation = null;
+
+    // LinkedIn meta title pattern: "Name - Headline | LinkedIn" or "Name | LinkedIn"
+    if (ogTitle) {
+      const cleaned = ogTitle.replace(/\s*\|\s*LinkedIn.*$/i, '').trim();
+      if (cleaned.includes(' - ')) {
+        const parts = cleaned.split(' - ');
+        parsedName = parts[0].trim();
+        parsedHeadline = parts.slice(1).join(' - ').trim();
+      } else {
+        parsedName = cleaned;
+      }
+    }
+
+    // LinkedIn meta description pattern often contains location & headline summary
+    let parsedAbout = ogDesc || null;
+    if (ogDesc) {
+      // e.g. "Location · Headline · Experience · Education"
+      const parts = ogDesc.split(' · ');
+      if (parts.length > 1 && !parsedLocation) {
+        parsedLocation = parts[0].trim();
+      }
+    }
+
+    return {
+      name: parsedName,
+      headline: parsedHeadline,
+      location: parsedLocation,
+      about: parsedAbout,
+      profileImage: ogImage,
+      ogUrl: ogUrl,
+      canonicalUrl: canonical,
+      additional: {
+        metaTitle: ogTitle,
+        metaDescription: ogDesc
+      }
+    };
+  }
+
+  /**
+   * Extract from public DOM selectors, microdata, and top cards
+   */
+  extractDomData($) {
+    const result = {
+      name: null,
+      headline: null,
+      location: null,
+      about: null,
+      profileImage: null,
+      experience: [],
+      education: [],
+      skills: [],
+      certifications: [],
+      languages: [],
+      additional: {}
+    };
+
+    // Name Selectors
+    const nameEl = $('h1.top-card-layout__title, h1.top-card__title, .top-card__name, [data-anonymize="person-name"], h1.v-align-middle, .pv-top-card--list h1').first();
+    if (nameEl.length) {
+      result.name = nameEl.text().trim();
+    }
+
+    // Headline Selectors
+    const headlineEl = $('.top-card-layout__headline, .top-card__subline, .pv-top-card--list-bullet h2, h2.top-card-layout__headline').first();
+    if (headlineEl.length) {
+      result.headline = headlineEl.text().trim();
+    }
+
+    // Location Selectors
+    const locationEl = $('.top-card__subline-item, .top-card-layout__first-subline, .pv-top-card--list-bullet li, .profile-info-subheader').first();
+    if (locationEl.length) {
+      const locText = locationEl.text().trim().replace(/\s+/g, ' ');
+      // Filter out connection counts or invalid strings
+      if (!locText.toLowerCase().includes('connections') && !locText.toLowerCase().includes('followers')) {
+        result.location = locText;
+      }
+    }
+
+    // About / Summary Selectors
+    const aboutEl = $('.core-section-container__content p, .summary-section p, .about-section .pv-about__summary-text, [data-section="summary"] p').first();
+    if (aboutEl.length) {
+      result.about = aboutEl.text().trim();
+    }
+
+    // Profile Image Selectors
+    const imgEl = $('img.top-card-layout__entity-image, img.profile-image, img[data-anonymize="headshot-photo"], .pv-top-card__photo img').first();
+    if (imgEl.length) {
+      const src = imgEl.attr('src') || imgEl.attr('data-delayed-url') || imgEl.attr('data-ghost-url');
+      if (src && !src.includes('data:image/gif') && !src.includes('ghost-person')) {
+        result.profileImage = src.trim();
+      }
+    }
+
+    // Experience Items
+    $('section.experience-section li, ul.experience__list li, .experience-item, li.experience-group').each((_, el) => {
+      const $item = $(el);
+      const title = $item.find('h3, .experience-item__title, .profile-section-card__title').first().text().trim();
+      const company = $item.find('h4, .experience-item__subtitle, .profile-section-card__subtitle').first().text().trim();
+      const dateRange = $item.find('.date-range, .experience-item__duration, .profile-section-card__metadata').first().text().trim();
+      const location = $item.find('.experience-item__location').first().text().trim();
+      const description = $item.find('p.show-more-less-text__text--more, .experience-item__description').first().text().trim();
+
+      if (title || company) {
+        const { startDate, endDate } = this.parseDateRange(dateRange);
+        result.experience.push({
+          title: title || '',
+          company: company || '',
+          location: location || '',
+          startDate: startDate || '',
+          endDate: endDate || '',
+          description: description || ''
+        });
+      }
+    });
+
+    // Education Items
+    $('section.education-section li, ul.education__list li, .education-item').each((_, el) => {
+      const $item = $(el);
+      const inst = $item.find('h3, .education__school-name, .profile-section-card__title').first().text().trim();
+      const degree = $item.find('h4, .education__degree-name, .profile-section-card__subtitle').first().text().trim();
+      const dateRange = $item.find('.date-range, .education__dates, .profile-section-card__metadata').first().text().trim();
+      const description = $item.find('p, .education-item__description').first().text().trim();
+
+      if (inst) {
+        const { startDate, endDate } = this.parseDateRange(dateRange);
+        result.education.push({
+          institution: inst,
+          degree: degree || '',
+          fieldOfStudy: '',
+          startDate: startDate || '',
+          endDate: endDate || '',
+          description: description || ''
+        });
+      }
+    });
+
+    // Certifications
+    $('section.certifications-section li, .certifications__list li, .certification-item').each((_, el) => {
+      const $item = $(el);
+      const name = $item.find('h3, .profile-section-card__title').first().text().trim();
+      const issuer = $item.find('h4, .profile-section-card__subtitle').first().text().trim();
+      const dateRange = $item.find('.profile-section-card__metadata').first().text().trim();
+
+      if (name) {
+        const { startDate } = this.parseDateRange(dateRange);
+        result.certifications.push({
+          name: name,
+          issuer: issuer || '',
+          issueDate: startDate || '',
+          expirationDate: '',
+          credentialId: ''
+        });
+      }
+    });
+
+    // Skills
+    $('section.skills-section li, ul.skills__list li, .skill-item').each((_, el) => {
+      const skillText = $(el).text().trim();
+      if (skillText && skillText.length < 100) {
+        result.skills.push(skillText);
+      }
+    });
+
+    // Languages
+    $('section.languages-section li, ul.languages__list li, .language-item').each((_, el) => {
+      const name = $(el).find('h3, strong').first().text().trim();
+      const prof = $(el).find('p, span').last().text().trim();
+      if (name) {
+        result.languages.push({
+          name: name,
+          proficiency: prof || ''
+        });
+      }
+    });
+
+    return result;
+  }
+
+  parseDateRange(raw) {
+    if (!raw) return { startDate: '', endDate: '' };
+    const cleaned = raw.replace(/\s+/g, ' ').trim();
+    const parts = cleaned.split(/–|-| to /i);
+    return {
+      startDate: (parts[0] || '').trim(),
+      endDate: (parts[1] || '').trim()
+    };
+  }
+}
+
+module.exports = new LinkedInParser();
