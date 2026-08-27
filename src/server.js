@@ -5,9 +5,12 @@ const logger = require('./utils/logger');
 // Optional DB connection if MONGODB_URI is provided
 if (env.MONGODB_URI) {
   const mongoose = require('mongoose');
-  mongoose.connect(env.MONGODB_URI)
+  mongoose.connection.on('error', (err) => {
+    logger.warn(`MongoDB runtime error: ${err.message}`);
+  });
+  mongoose.connect(env.MONGODB_URI, { serverSelectionTimeoutMS: 3000 })
     .then(() => logger.info('Connected to MongoDB database.'))
-    .catch((err) => logger.warn(`MongoDB connection failed, continuing with in-memory storage: ${err.message}`));
+    .catch((err) => logger.warn(`MongoDB initial connection failed, continuing with in-memory storage: ${err.message}`));
 }
 
 const server = app.listen(env.PORT, () => {
@@ -27,7 +30,7 @@ function gracefulShutdown(signal) {
   setTimeout(() => {
     logger.error('Forced shutdown due to timeout.');
     process.exit(1);
-  }, 10000);
+  }, 5000);
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
