@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const path = require('path');
 const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
 const requestLogger = require('./middleware/requestLogger');
@@ -25,10 +26,13 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 // Safe Request Logging
 app.use(requestLogger);
 
+// Serve Web UI Static Assets from public/
+app.use(express.static(path.join(__dirname, '../public')));
+
 // Mount API routes
 app.use(routes);
 
-// 404 Handler for undefined routes
+// 404 Handler for undefined API routes
 app.use((req, res) => {
   res.status(HTTP_STATUS.NOT_FOUND).json({
     success: false,

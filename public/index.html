@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinkedIn Profile JSON Extractor | API & Playground</title>
+  <meta name="description" content="Production-ready LinkedIn profile JSON extractor with zero-cost architecture, Schema.org parsing, and instant JSON preview.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glow-bg top-glow"></div>
+  <div class="glow-bg bottom-glow"></div>
+
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 8.76c.97 0 1.75-.79 1.75-1.76s-.78-1.75-1.75-1.75a1.76 1.76 0 0 0-1.76 1.75c0 .97.79 1.76 1.76 1.76m1.39 9.74v-8.37H5.07v8.37h2.78z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="title">LinkedIn Profile JSON API</h1>
+          <p class="subtitle">Extract structured JSON profiles, Schema.org metadata & skills</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-success"><span class="pulse-dot"></span> Live API</span>
+        <span class="badge badge-primary">$0 Open Source</span>
+      </div>
+    </header>
+
+    <!-- Main Card / Search Area -->
+    <main class="card search-card">
+      <form id="extract-form">
+        <label for="profile-url" class="input-label">LinkedIn Profile URL</label>
+        <div class="input-group">
+          <div class="input-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+          </div>
+          <input 
+            type="url" 
+            id="profile-url" 
+            name="url" 
+            placeholder="https://www.linkedin.com/in/faiz-khatri-1912ab344/" 
+            required 
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <button type="button" id="btn-paste" class="btn-icon" title="Paste from clipboard">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+            </svg>
+          </button>
+          <button type="submit" id="btn-submit" class="btn-primary">
+            <span class="btn-text">Extract JSON</span>
+            <div class="spinner" id="spinner" style="display: none;"></div>
+          </button>
+        </div>
+      </form>
+
+      <!-- Quick sample tests -->
+      <div class="quick-examples">
+        <span class="quick-label">Quick Test:</span>
+        <button type="button" class="chip" data-url="https://www.linkedin.com/in/faiz-khatri-1912ab344/">My Profile</button>
+        <button type="button" class="chip" data-url="https://www.linkedin.com/in/satyanadella/">Satya Nadella</button>
+        <button type="button" class="chip" data-url="https://www.google.com/invalid-test">Invalid Domain (400)</button>
+        <button type="button" class="chip" data-url="https://www.linkedin.com/company/microsoft/">Company URL (422)</button>
+      </div>
+    </main>
+
+    <!-- Error Alert Banner -->
+    <div id="error-banner" class="alert alert-error" style="display: none;">
+      <div class="alert-icon">⚠️</div>
+      <div class="alert-content">
+        <strong id="error-code">ERROR_CODE</strong>
+        <p id="error-message">Error message details here.</p>
+      </div>
+      <button type="button" class="alert-close" id="btn-close-error">&times;</button>
+    </div>
+
+    <!-- Results Section -->
+    <section id="results-section" class="results-section" style="display: none;">
+      <div class="results-header">
+        <div class="tabs">
+          <button type="button" class="tab active" data-tab="visual">Visual Card</button>
+          <button type="button" class="tab" data-tab="json">JSON Response</button>
+          <button type="button" class="tab" data-tab="curl">cURL & API</button>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn-secondary" id="btn-copy-json">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy JSON</span>
+          </button>
+          <button type="button" class="btn-secondary" id="btn-download-json">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>Download</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 1: Visual Card -->
+      <div id="tab-visual" class="tab-content active">
+        <div class="card profile-card">
+          <div class="profile-header">
+            <div class="avatar-container">
+              <img id="profile-img" src="" alt="Profile Image" class="profile-avatar">
+              <div id="avatar-fallback" class="avatar-fallback">👤</div>
+            </div>
+            <div class="profile-main-info">
+              <div class="profile-name-row">
+                <h2 id="profile-name" class="profile-name">User Name</h2>
+                <a id="profile-link" href="#" target="_blank" rel="noopener noreferrer" class="profile-external-link">View on LinkedIn ↗</a>
+              </div>
+              <p id="profile-headline" class="profile-headline">Professional Headline</p>
+              <p id="profile-location" class="profile-location">📍 Location</p>
+            </div>
+          </div>
+
+          <div id="section-about" class="profile-section">
+            <h3 class="section-title">About</h3>
+            <p id="profile-about" class="profile-about-text"></p>
+          </div>
+
+          <div id="section-experience" class="profile-section">
+            <h3 class="section-title">Experience</h3>
+            <div id="experience-list" class="timeline"></div>
+          </div>
+
+          <div id="section-education" class="profile-section">
+            <h3 class="section-title">Education</h3>
+            <div id="education-list" class="timeline"></div>
+          </div>
+
+          <div id="section-skills" class="profile-section">
+            <h3 class="section-title">Skills</h3>
+            <div id="skills-list" class="skills-grid"></div>
+          </div>
+
+          <div class="metadata-footer">
+            <span>Retrieved: <strong id="meta-time">--</strong></span>
+            <span>Status: <span class="badge badge-success" id="meta-cached">Live</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Raw JSON -->
+      <div id="tab-json" class="tab-content">
+        <div class="code-container">
+          <pre><code id="json-code" class="language-json"></code></pre>
+        </div>
+      </div>
+
+      <!-- Tab 3: cURL & API Spec -->
+      <div id="tab-curl" class="tab-content">
+        <div class="card api-docs-card">
+          <h3 class="section-title">Programmatic API Access</h3>
+          <p class="text-muted">You can integrate this endpoint in your backend applications:</p>
+          <div class="code-container">
+            <pre><code id="curl-code">curl -X POST http://localhost:3000/api/linkedin/profile \\
+  -H "Content-Type: application/json" \\
+  -d '{"url": "https://www.linkedin.com/in/faiz-khatri-1912ab344/"}'</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
