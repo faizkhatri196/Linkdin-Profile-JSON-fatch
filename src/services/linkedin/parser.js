@@ -115,7 +115,7 @@ class LinkedInParser {
       for (const chunk of chunks) {
         if (typeof chunk !== 'string') continue;
 
-        // Title in metadata
+        // 1. Name from metadata title
         const metaTitleMatch = chunk.match(/\["title",null,\{"children":"([^"]+)\s*\|\s*LinkedIn"\}\]/);
         if (metaTitleMatch && !result.name) {
           const t = metaTitleMatch[1].trim();
@@ -128,31 +128,47 @@ class LinkedInParser {
           }
         }
 
-        // Action buttons containing member name
-        const actionMatch = chunk.match(/"children":\["(?:Unfollow|Report|Block)\s+([^"]+)"\]/);
-        if (actionMatch && !result.name) {
-          result.name = actionMatch[1].trim();
+        // 2. Name from children array containing 2-3 capitalized words
+        const nameRegex = /"children":\["([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})"\]/g;
+        let nm;
+        while ((nm = nameRegex.exec(chunk)) !== null) {
+          const cand = nm[1].trim();
+          const blacklist = ['Send profile', 'Save to', 'About this', 'Stop seeing', 'Top card', 'Main Feed', 'LinkedIn Member', 'For third Party'];
+          if (!blacklist.some(b => cand.includes(b)) && !result.name) {
+            result.name = cand;
+          }
         }
 
-        // Profile Image
-        const imgMatch = chunk.match(/"imageUrl":\s*"([^"]+)"/) || chunk.match(/"url":\s*"(https:\/\/media\.licdn\.com\/dms\/image\/[^"]+)"/);
-        if (imgMatch && !result.profileImage) {
-          result.profileImage = imgMatch[1];
+        // 3. Profile Avatar Image from imageRenditions
+        if (!result.profileImage && chunk.includes('renderPayload') && chunk.includes('rootUrl')) {
+          const rootMatch = chunk.match(/"rootUrl":\s*"([^"]+)"/);
+          const suffixMatch = chunk.match(/"suffixUrl":\s*"([^"]+)"/);
+          if (rootMatch && suffixMatch) {
+            result.profileImage = rootMatch[1] + suffixMatch[1];
+          }
         }
 
-        // Headline
-        const headlineMatch = chunk.match(/"headline":\s*"([^"]+)"/);
-        if (headlineMatch && !result.headline) {
-          result.headline = headlineMatch[1];
+        // 4. Location
+        const locRegex = /"children":\["([A-Za-z\s]+,\s*[A-Za-z\s]+(?:,\s*[A-Za-z\s]+)?)"\]/g;
+        let lm;
+        while ((lm = locRegex.exec(chunk)) !== null) {
+          const cand = lm[1].trim();
+          if (!result.location && !cand.includes('LinkedIn') && !cand.includes('Send') && !cand.includes('Save')) {
+            result.location = cand;
+          }
         }
 
-        // Location
-        const locMatch = chunk.match(/"locationName":\s*"([^"]+)"/) || chunk.match(/"geoCountryName":\s*"([^"]+)"/);
-        if (locMatch && !result.location) {
-          result.location = locMatch[1];
+        // 5. Headline / Top card children
+        const headlineRegex = /"children":\["([A-Z][^"]*(?:\bat\b|@|Engineer|Developer|CEO|Founder|Manager|Student|Lead|Director|Specialist)[^"]*)"\]/g;
+        let hm;
+        while ((hm = headlineRegex.exec(chunk)) !== null) {
+          const candidate = hm[1].trim();
+          if (!candidate.includes('LinkedIn') && !candidate.includes('Unfollow') && !candidate.includes('Report') && !candidate.includes('Stop seeing') && !candidate.includes('Student at')) {
+            if (!result.headline) result.headline = candidate;
+          }
         }
 
-        // Summary
+        // 6. Summary
         const summaryMatch = chunk.match(/"summary":\s*"([^"]+)"/);
         if (summaryMatch && !result.about) {
           result.about = summaryMatch[1];
@@ -317,7 +333,6 @@ class LinkedInParser {
     let parsedHeadline = null;
     let parsedLocation = null;
 
-    // LinkedIn meta title pattern: "Name - Headline | LinkedIn" or "Name | LinkedIn"
     if (ogTitle) {
       const cleaned = ogTitle.replace(/\s*\|\s*LinkedIn.*$/i, '').trim();
       if (cleaned.includes(' - ')) {
@@ -329,7 +344,6 @@ class LinkedInParser {
       }
     }
 
-    // LinkedIn meta description pattern often contains location & headline summary
     let parsedAbout = ogDesc || null;
     if (ogDesc) {
       const parts = ogDesc.split(' · ');
