@@ -13,8 +13,9 @@ if (env.MONGODB_URI) {
     .catch((err) => logger.warn(`MongoDB initial connection failed, continuing with in-memory storage: ${err.message}`));
 }
 
-const server = app.listen(env.PORT, () => {
-  logger.info(`LinkedIn Profile JSON API running on port ${env.PORT} [Environment: ${env.NODE_ENV}]`);
+const HOST = '0.0.0.0';
+const server = app.listen(env.PORT, HOST, () => {
+  logger.info(`LinkedIn Profile JSON API running on http://localhost:${env.PORT} [Host: ${HOST}, Env: ${env.NODE_ENV}]`);
   logger.info(`Health check available at http://localhost:${env.PORT}/health`);
   logger.info(`Profile endpoint available at http://localhost:${env.PORT}/api/linkedin/profile`);
 });
