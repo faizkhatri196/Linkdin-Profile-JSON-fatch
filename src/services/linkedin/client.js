@@ -34,7 +34,9 @@ class LinkedInHttpClient {
       'Upgrade-Insecure-Requests': '1'
     };
 
-    if (env.LINKEDIN_LI_AT) {
+    if (env.LINKEDIN_COOKIE) {
+      headers['Cookie'] = env.LINKEDIN_COOKIE;
+    } else if (env.LINKEDIN_LI_AT) {
       headers['Cookie'] = `li_at=${env.LINKEDIN_LI_AT}`;
     }
 
@@ -142,7 +144,7 @@ class LinkedInHttpClient {
         status: statusCode,
         statusCode,
         finalUrl,
-        authenticated: Boolean(env.LINKEDIN_LI_AT)
+        authenticated: Boolean(env.LINKEDIN_COOKIE || env.LINKEDIN_LI_AT)
       };
     } catch (err) {
       clearTimeout(timeoutId);

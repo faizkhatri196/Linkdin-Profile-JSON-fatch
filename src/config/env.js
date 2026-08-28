@@ -1,7 +1,5 @@
-/**
- * Environment Configuration with Safe Defaults
- */
 const dotenv = require('dotenv');
+
 dotenv.config();
 
 const env = {
@@ -12,7 +10,7 @@ const env = {
   CACHE_TTL_SECONDS: parseInt(process.env.CACHE_TTL_SECONDS || '3600', 10),
   SCRAPER_TIMEOUT_MS: parseInt(process.env.SCRAPER_TIMEOUT_MS || '15000', 10),
   LINKEDIN_LI_AT: process.env.LINKEDIN_LI_AT || '',
-  LINKEDIN_JSESSIONID: process.env.LINKEDIN_JSESSIONID || '',
+  LINKEDIN_COOKIE: process.env.LINKEDIN_COOKIE || '',
   MONGODB_URI: process.env.MONGODB_URI || ''
 };
 
