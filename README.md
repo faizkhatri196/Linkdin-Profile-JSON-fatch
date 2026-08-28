@@ -40,27 +40,27 @@ This repository delivers a **production-grade, zero-cost REST API** that accepts
 ## 🏗️ Reverse-Engineering Architecture
 
 ```mermaid
-graph TD
-    Client["Client / Web UI / cURL"] -->|POST /api/linkedin/profile| Middleware["Express Pipeline (RateLimiter, Helmet, JSON Parser)"]
+flowchart TD
+    Client["Client / Web UI / cURL"] -->|POST /api/linkedin/profile| Middleware["Express Pipeline: RateLimiter, Helmet, JSON Parser"]
     Middleware --> Validator["Zod URL Validator & Canonicalizer"]
     Validator --> Service["LinkedIn Service & TTL Cache Bridge"]
     
-    subgraph "Cache Layer"
-        Service -->|Check Cache| Cache{"In-Memory Cache Hit?"}
-        Cache -->|Yes| CachedResponse["Return Cached JSON (TTL)"]
+    subgraph CacheLayer ["Cache Layer"]
+        Service --> CheckCache{"In-Memory Cache Hit?"}
+        CheckCache -->|Yes| CachedResponse["Return Cached JSON (TTL)"]
     end
     
-    subgraph "Reverse-Engineered Direct HTTP Layer"
-        Cache -->|No| HttpClient["LinkedInHttpClient (client.js)"]
-        HttpClient -->|Build Headers & Cookies| Endpoints["Endpoint Registry (endpoints.js)"]
+    subgraph HttpLayer ["Reverse-Engineered Direct HTTP Layer"]
+        CheckCache -->|No| HttpClient["LinkedInHttpClient: client.js"]
+        HttpClient --> Endpoints["Endpoint Registry: endpoints.js"]
         Endpoints -->|Direct HTTPS GET| Upstream["LinkedIn Edge Server"]
-        Upstream -->|HTTP Response (JSON-LD / RSC Stream / HTML)| HttpClient
+        Upstream -->|HTTP Response Data| HttpClient
     end
     
-    subgraph "Parsing & Normalization Engine"
-        HttpClient --> Parser["Defensive LinkedInParser (parser.js)"]
-        Parser -->|Extract Signals| Normalizer["Schema Normalizer (normalizer.js)"]
-        Normalizer -->|Track Availability| Output["Structured Output JSON"]
+    subgraph ParserLayer ["Parsing & Normalization Engine"]
+        HttpClient --> Parser["Defensive LinkedInParser: parser.js"]
+        Parser --> Normalizer["Schema Normalizer: normalizer.js"]
+        Normalizer --> Output["Structured Output JSON"]
     end
     
     Output --> Service
