@@ -22,9 +22,8 @@ class LinkedInHttpClient {
     const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
     const headers = {
       'User-Agent': userAgent,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
       'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
       'Sec-Ch-Ua-Mobile': '?0',
       'Sec-Ch-Ua-Platform': '"Windows"',
@@ -32,8 +31,7 @@ class LinkedInHttpClient {
       'Sec-Fetch-Mode': 'navigate',
       'Sec-Fetch-Site': 'none',
       'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1',
-      'Cache-Control': 'max-age=0'
+      'Upgrade-Insecure-Requests': '1'
     };
 
     if (env.LINKEDIN_LI_AT) {
@@ -44,7 +42,7 @@ class LinkedInHttpClient {
   }
 
   /**
-   * Execute direct HTTP request to LinkedIn endpoint with timeout and status handling
+   * Execute direct HTTP request to LinkedIn endpoint with timeout and redirect handling
    * @param {string} targetUrl 
    * @returns {Promise<{html: string, status: number, statusCode: number, finalUrl: string, authenticated: boolean}>}
    */
@@ -55,18 +53,62 @@ class LinkedInHttpClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
+    let currentUrl = targetUrl;
+    let response;
+    let redirects = 0;
+    const maxRedirects = 4;
+    const visitedUrls = new Set([targetUrl]);
+
     try {
-      const response = await fetch(targetUrl, {
-        method: 'GET',
-        headers: this.getHeaders(),
-        redirect: 'follow',
-        signal: controller.signal
-      });
+      while (redirects < maxRedirects) {
+        response = await fetch(currentUrl, {
+          method: 'GET',
+          headers: this.getHeaders(),
+          redirect: 'manual',
+          signal: controller.signal
+        });
+
+        // Detect authwall / checkpoint / login URL directly
+        const respUrl = response.url || currentUrl;
+        if (respUrl.includes('/authwall') || respUrl.includes('/checkpoint/') || respUrl.includes('/login') || respUrl.includes('/uas/')) {
+          logger.warn(`LinkedIn redirected to authwall checkpoint: ${respUrl}`);
+          throw new ProfileRestrictedError('LinkedIn restricted public access for this profile (redirected to authwall).');
+        }
+
+        // Check for 3xx redirect status
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+          const loc = response.headers && typeof response.headers.get === 'function' ? response.headers.get('location') : null;
+          if (!loc) break;
+
+          const nextUrl = loc.startsWith('http') ? loc : new URL(loc, currentUrl).href;
+
+          if (nextUrl.includes('/authwall') || nextUrl.includes('/checkpoint/') || nextUrl.includes('/login') || nextUrl.includes('/uas/')) {
+            logger.warn(`LinkedIn redirected to authwall checkpoint: ${nextUrl}`);
+            throw new ProfileRestrictedError('LinkedIn restricted public access for this profile (redirected to authwall).');
+          }
+
+          if (visitedUrls.has(nextUrl)) {
+            logger.warn(`LinkedIn redirect loop detected for ${nextUrl}. Session expired or checkpoint triggered.`);
+            throw new UpstreamRateLimitError('LinkedIn anti-bot protection triggered (HTTP 302 Loop). Profile extraction is temporarily restricted by upstream.');
+          }
+
+          visitedUrls.add(nextUrl);
+          currentUrl = nextUrl;
+          redirects++;
+        } else {
+          break;
+        }
+      }
 
       clearTimeout(timeoutId);
 
-      const finalUrl = response.url || targetUrl;
-      const statusCode = response.status;
+      const finalUrl = response && response.url ? response.url : currentUrl;
+      const statusCode = response ? response.status : 502;
+
+      // Detect authwall on finalUrl
+      if (finalUrl.includes('/authwall') || finalUrl.includes('/checkpoint/') || finalUrl.includes('/login')) {
+        throw new ProfileRestrictedError('LinkedIn restricted public access for this profile (redirected to authwall).');
+      }
 
       // Handle 404
       if (statusCode === HTTP_STATUS.NOT_FOUND) {
@@ -89,17 +131,11 @@ class LinkedInHttpClient {
         throw new ProfileRestrictedError('LinkedIn profile access is forbidden or restricted by upstream.');
       }
 
-      // Detect /authwall redirection
-      if (finalUrl.includes('/authwall') || finalUrl.includes('/checkpoint/')) {
-        logger.warn(`LinkedIn redirected request to authwall: ${finalUrl}`);
-        throw new ProfileRestrictedError('LinkedIn restricted public access for this profile (redirected to authwall).');
-      }
-
-      if (!response.ok) {
+      if (!response || !response.ok) {
         throw new AppError(`LinkedIn upstream returned unexpected HTTP ${statusCode}`, 502, 'UPSTREAM_ERROR');
       }
 
-      const html = await response.text();
+      const html = typeof response.text === 'function' ? await response.text() : '';
 
       return {
         html,
