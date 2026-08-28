@@ -52,7 +52,9 @@ describe('POST /api/linkedin/profile Endpoint', () => {
     jest.spyOn(extractor, 'fetchProfileHtml').mockResolvedValue({
       html: sampleHtml,
       status: 200,
-      finalUrl: 'https://www.linkedin.com/in/alex-rivera-engineer/'
+      statusCode: 200,
+      finalUrl: 'https://www.linkedin.com/in/alex-rivera-engineer/',
+      authenticated: false
     });
 
     const res = await request(app)
@@ -65,7 +67,7 @@ describe('POST /api/linkedin/profile Endpoint', () => {
     expect(res.body.profile.name).toBe('Alex Rivera');
     expect(res.body.profile.headline).toContain('Senior Software Engineer');
     expect(res.body.profile.experience.length).toBeGreaterThan(0);
-    expect(res.body.profile.skills).toContain('Node.js');
+    expect(res.body.profile.skills).toEqual(expect.arrayContaining([{ name: 'Node.js' }]));
     expect(res.body.metadata.retrievedAt).toBeDefined();
   });
 

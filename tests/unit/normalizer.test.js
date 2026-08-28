@@ -48,7 +48,7 @@ describe('LinkedIn Data Normalizer', () => {
     expect(normalized.success).toBe(true);
     expect(normalized.source).toBe('linkedin');
     expect(normalized.profile.name).toBe('John Doe');
-    expect(normalized.profile.skills).toEqual(['JavaScript', 'Node.js']);
+    expect(normalized.profile.skills).toEqual([{ name: 'JavaScript' }, { name: 'Node.js' }]);
     expect(normalized.metadata.fieldsAvailable).toContain('name');
     expect(normalized.metadata.fieldsAvailable).toContain('experience');
     expect(normalized.metadata.fieldsUnavailable).toHaveLength(0);

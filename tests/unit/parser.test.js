@@ -18,7 +18,7 @@ describe('LinkedIn HTML Parser', () => {
     expect(result.experience.length).toBeGreaterThanOrEqual(1);
     expect(result.education.length).toBeGreaterThanOrEqual(1);
     expect(result.skills.length).toBeGreaterThan(0);
-    expect(result.skills).toContain('Node.js');
+    expect(result.skills).toEqual(expect.arrayContaining([{ name: 'Node.js' }]));
     expect(result.certifications.length).toBeGreaterThanOrEqual(1);
     expect(result.languages.length).toBe(2);
   });
