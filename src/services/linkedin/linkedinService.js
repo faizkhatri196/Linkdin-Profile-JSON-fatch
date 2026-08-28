@@ -1,23 +1,25 @@
-const cache = require('../../utils/cache');
 const extractor = require('./extractor');
 const parser = require('./parser');
 const normalizer = require('./normalizer');
+const cache = require('../../utils/cache');
 const logger = require('../../utils/logger');
-const env = require('../../config/env');
+const { extractVanityName } = require('./endpoints');
 
 class LinkedInService {
   /**
-   * Main pipeline to retrieve, parse, and normalize a LinkedIn profile
-   * @param {string} canonicalUrl 
-   * @returns {Promise<object>} Structured response object
+   * Orchestrates the direct reverse-engineered extraction pipeline:
+   * Direct HTTP -> Parser -> Normalizer -> In-Memory Cache
+   * @param {string} canonicalUrl - Validated and canonicalized LinkedIn profile URL
+   * @returns {Promise<object>} Normalized structured profile JSON
    */
   async getProfile(canonicalUrl) {
-    const cacheKey = `li_profile:${canonicalUrl.toLowerCase()}`;
+    const vanityName = extractVanityName(canonicalUrl);
+    const cacheKey = `li_profile:${canonicalUrl}`;
 
     // 1. Check in-memory cache
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
-      logger.info(`Returning cached profile for: ${canonicalUrl}`);
+      logger.info(`Returning cached profile for: ${vanityName || canonicalUrl}`);
       return {
         ...cachedData,
         metadata: {
@@ -27,23 +29,22 @@ class LinkedInService {
       };
     }
 
-    // 2. Fetch raw HTML from upstream
-    const { html, status, finalUrl } = await extractor.fetchProfileHtml(canonicalUrl);
+    // 2. Make Direct HTTP request to LinkedIn endpoint (NO browser automation)
+    const { html, authenticated } = await extractor.fetchProfileHtml(canonicalUrl);
 
-    // 3. Parse HTML, JSON-LD, and meta tags
-    const rawData = parser.parse(html, canonicalUrl);
+    // 3. Parse multi-signal data defensively (JSON-LD, OpenGraph, DOM, RSC Flight stream)
+    const rawParsed = parser.parse(html, canonicalUrl);
 
-    // 4. Normalize according to API contract
-    const isAuthenticated = Boolean(env.LINKEDIN_LI_AT);
-    const normalized = normalizer.normalize(rawData, canonicalUrl, {
+    // 4. Normalize fields into standard hiring-challenge response schema
+    const normalizedResponse = normalizer.normalize(rawParsed, canonicalUrl, {
       cached: false,
-      authenticated: isAuthenticated
+      authenticated
     });
 
-    // 5. Save in memory cache
-    cache.set(cacheKey, normalized);
+    // 5. Store in zero-cost in-memory cache
+    cache.set(cacheKey, normalizedResponse);
 
-    return normalized;
+    return normalizedResponse;
   }
 }
 
